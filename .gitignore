@@ -1,0 +1,7 @@
+/__pycache__/
+/catboost_info/
+/embed/
+/prosept_env/
+datasets/*.csv
+/*.ipynb
+/*.rar
