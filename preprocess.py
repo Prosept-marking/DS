@@ -4,14 +4,15 @@ import pickle
 import re
 
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
+import torch
+from transformers import AutoTokenizer, AutoModel
 
 
 def load_data():
     # серверный путь
     pth1 = '/datasets/'
     # локальный путь
-    pth2 = 'C:\\Dev\\prosept\\datasets\\'
+    pth2 = 'D:\\Dev\\prosept\\datasets\\'
 
     try:
         if os.path.exists(pth1):
@@ -46,58 +47,53 @@ def clear_text(text):
     return ' '.join(text.split())
 
 
-def count_tfidf(data):
-    count_tf_idf = TfidfVectorizer()
-    count_tf_idf.fit_transform(data)
-    return count_tf_idf
+def get_encoder():
+    encoder = AutoModel.from_pretrained("cointegrated/LaBSE-en-ru")
+    return encoder
 
 
-def prepare_data():
-    df_product = load_data()
-    # main base
-    data_product = df_product[['id', 'name_1c', 'recommended_price']].copy()
-    data_product = data_product.loc[data_product['name_1c'].notna()].reset_index()
-    data_product = data_product.drop(['index'], axis=1)
-    # normalizing name product in main base
-    data_product['clear_name'] = data_product['name_1c'].apply(clear_text)
-    return data_product
-    
-
-def fit_tfidf():
-    # load dataset
-    data_product = prepare_data()
-    # fit tf_idf
-    fitted_tf_idf = count_tfidf(data_product['clear_name'])
-    return fitted_tf_idf
+def get_tokenizer():
+    tokenizer = AutoTokenizer.from_pretrained("cointegrated/LaBSE-en-ru")
+    return tokenizer
 
 
 def prepare_query(query):
-    # normalizing query name product
-    clear_name_product = clear_text(query)
-    tfidf = fit_tfidf()
-    # calculating tfidf
-    query_tfidf = tfidf.transform([clear_name_product])
-    return query_tfidf
+    # normilizing query's header
+    query_header = clear_text(query)
+    # get tokenizer
+    tokenizer = get_tokenizer()
+    # get encoder
+    encoder = get_encoder()
+    # compute tokens
+    encoded_input = tokenizer(query_header, padding=True, truncation=True, max_length=64, return_tensors='pt')
+    # calc query's embedding
+    with torch.no_grad():
+        encoded_output = encoder(**encoded_input)
+    query_embed = encoded_output.pooler_output
+    query_embed = torch.nn.functional.normalize(query_embed)
+    query_embed = query_embed.reshape(1, -1)
+    return query_embed
 
 
-def load_model():
-    with open('prosept\model\knn_model.pkl', 'rb') as file:
+def get_model():
+    with open('D:\\Dev\\prosept\\model\\nn_model.pkl', 'rb') as file:
         clf = pickle.load(file)
     return clf
 
 
-def matching(query):
-    # load clf
-    clf = load_model()
-    # calc query tfidf
-    query_tfidf = prepare_query(query)
+def matching(query, n_neighbors=5):
+    # get classificator
+    clf = get_model()
+    # get query's embedding
+    query_embedding = prepare_query(query)
     # compute 5 neighbors for query
-    neighbors = clf.kneighbors(query_tfidf, n_neighbors=5, return_distance=False)
-    data_product = prepare_data()
-    result_matching = []
+    neighbors = clf.kneighbors(query_embedding, n_neighbors=n_neighbors, return_distance=False)
+    df_product = load_data()
+    
     # listing 5 neighbors
     for i in range(len(neighbors)):
+        result_matching = []
         for j in neighbors[i]:
-            result_matching.append(data_product.iloc[j]['id'])
+            result_matching.append(df_product.iloc[j]['id'])
 
-    return result_matching
+        return result_matching
